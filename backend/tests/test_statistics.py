@@ -79,8 +79,12 @@ def test_dashboard_returns_all_sections(api, seeded):
     data = api.data(api.get("/api/v1/statistics/dashboard"))
     assert set(data) == {
         "overview", "distributions", "trends", "ranking",
-        "overdue_tasks", "upcoming_tasks", "recent_activity",
+        "overdue_tasks", "upcoming_tasks", "recent_activity", "occupation_reminders",
     }
     assert len(data["trends"]) == 6
     assert data["recent_activity"]["records"]
     assert data["recent_activity"]["replacements"]
+    assert set(data["occupation_reminders"]) == {"overdue_restore", "pending_verify"}
+    # 演示数据中含一条占绿到期未恢复、一条待核验
+    assert len(data["occupation_reminders"]["overdue_restore"]) == 1
+    assert len(data["occupation_reminders"]["pending_verify"]) == 1

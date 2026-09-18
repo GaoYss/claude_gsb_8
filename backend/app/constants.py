@@ -130,6 +130,24 @@ MEASURE_UNIT = EnumGroup("measure_unit", [
     ("clump", "丛"),
 ])
 
+# ---------------------------------------------------------------- 占绿审批与恢复核验
+OCCUPATION_REASON = EnumGroup("occupation_reason", [
+    ("construction", "工程施工占用"),
+    ("utility", "管线迁改占用"),
+    ("traffic", "道路交通设施占用"),
+    ("event", "重大活动临时占用"),
+    ("rescue", "抢险救灾占用"),
+    ("other", "其他事由占用"),
+])
+
+OCCUPATION_STATUS = EnumGroup("occupation_status", [
+    ("pending", "待审批"),
+    ("approved", "占绿中"),
+    ("rejected", "已驳回"),
+    ("restored", "待核验"),
+    ("verified", "核验通过"),
+])
+
 # 前端下拉与文档共用的一份字典清单
 ENUM_GROUPS = {
     "green_space_type": GREEN_SPACE_TYPE,
@@ -144,6 +162,8 @@ ENUM_GROUPS = {
     "replacement_reason": REPLACEMENT_REASON,
     "old_plant_status": OLD_PLANT_STATUS,
     "measure_unit": MEASURE_UNIT,
+    "occupation_reason": OCCUPATION_REASON,
+    "occupation_status": OCCUPATION_STATUS,
 }
 
 

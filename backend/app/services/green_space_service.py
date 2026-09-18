@@ -5,7 +5,7 @@ from sqlalchemy import and_, func, or_
 from ..constants import ENUM_GROUPS, GREEN_SPACE_STATUS
 from ..errors import ConflictError
 from ..extensions import db
-from ..models import GreenSpace, MaintenanceRecord, MaintenanceTask, PlantReplacement
+from ..models import GreenSpace, MaintenanceRecord, MaintenanceTask, Occupation, PlantReplacement
 from ..models.maintenance_task import OPEN_STATUSES
 from ..utils.dates import format_date, today
 from ..utils.numbers import to_float
@@ -98,6 +98,12 @@ class GreenSpaceService(BaseService):
             .correlate(GreenSpace)
             .scalar_subquery()
         )
+        occupation_count = (
+            db.select(func.count(Occupation.id))
+            .where(Occupation.green_space_id == GreenSpace.id)
+            .correlate(GreenSpace)
+            .scalar_subquery()
+        )
 
         query = db.session.query(
             GreenSpace,
@@ -106,6 +112,7 @@ class GreenSpaceService(BaseService):
             record_count.label("record_count"),
             replacement_count.label("replacement_count"),
             last_maintenance.label("last_maintenance_date"),
+            occupation_count.label("occupation_count"),
         )
         query = cls._apply_filters(query, filters)
         query = query.order_by(parse_sort(args, cls.SORTABLE, GreenSpace.code.asc()))
@@ -113,7 +120,8 @@ class GreenSpaceService(BaseService):
 
     @classmethod
     def serialize_row(cls, row):
-        space, task_count, open_task_count, record_count, replacement_count, last_date = row
+        (space, task_count, open_task_count, record_count,
+         replacement_count, last_date, occupation_count) = row
         data = space.to_dict()
         data["statistics"] = {
             "task_count": task_count or 0,
@@ -121,6 +129,7 @@ class GreenSpaceService(BaseService):
             "record_count": record_count or 0,
             "replacement_count": replacement_count or 0,
             "last_maintenance_date": format_date(last_date),
+            "occupation_count": occupation_count or 0,
         }
         return data
 
@@ -216,6 +225,11 @@ class GreenSpaceService(BaseService):
             .all()
         )
 
+        recent_occupations = [
+            item.to_dict() for item in space.occupations[:5]
+        ]
+        active_occupation = space.active_occupation
+
         return {
             "green_space": space.to_dict(detail=True),
             "statistics": {
@@ -226,10 +240,14 @@ class GreenSpaceService(BaseService):
                 "replacement_quantity": to_float(replacement_stats[1]) or 0,
                 "replacement_amount": to_float(replacement_stats[2]) or 0,
                 "task_status": task_status,
+                # 占绿期间绿地不参与养护考核，不判定养护逾期
                 "is_maintenance_overdue": (
-                    record_stats[2] is None or (today() - record_stats[2]).days > 30
+                    active_occupation is None
+                    and (record_stats[2] is None or (today() - record_stats[2]).days > 30)
                 ),
+                "is_occupied": active_occupation is not None,
             },
+            "active_occupation": active_occupation.to_dict(detail=True) if active_occupation else None,
             "replacement_summary": [
                 {
                     "reason": reason,
@@ -243,6 +261,7 @@ class GreenSpaceService(BaseService):
             "recent_tasks": [item.to_dict() for item in recent_tasks],
             "recent_records": [item.to_dict() for item in recent_records],
             "recent_replacements": [item.to_dict() for item in recent_replacements],
+            "recent_occupations": recent_occupations,
         }
 
     # ------------------------------------------------------------ 写入
@@ -262,11 +281,24 @@ class GreenSpaceService(BaseService):
             .filter(PlantReplacement.green_space_id == space.id)
             .scalar()
             or 0,
+            "green_space_occupation": db.session.query(func.count(Occupation.id))
+            .filter(Occupation.green_space_id == space.id)
+            .scalar()
+            or 0,
         }
+        # 占绿生效中属于进行中的审批事项，即便强制删除也不允许，必须先完成恢复核验
+        active = space.active_occupation
+        if active is not None:
+            raise ConflictError(
+                f"该绿地占绿记录 {active.occupation_no} 生效中，占绿期间不能删除绿地，"
+                "请完成恢复核验后再操作",
+                details=counts,
+            )
         if sum(counts.values()) and not force:
             raise ConflictError(
                 "该绿地已存在养护任务 {maintenance_task} 条、养护记录 {maintenance_record} 条、"
-                "绿植更换记录 {plant_replacement} 条，删除将一并清除，请确认后重试".format(**counts),
+                "绿植更换记录 {plant_replacement} 条、占绿记录 {green_space_occupation} 条，"
+                "删除将一并清除，请确认后重试".format(**counts),
                 details=counts,
             )
         db.session.delete(space)

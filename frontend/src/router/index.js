@@ -27,6 +27,12 @@ const routes = [
         meta: { title: '绿地档案', activeMenu: '/green-spaces' },
       },
       {
+        path: 'occupations',
+        name: 'occupation-list',
+        component: () => import('@/views/occupation/OccupationListView.vue'),
+        meta: { title: '占绿审批', icon: 'Stamp' },
+      },
+      {
         path: 'tasks',
         name: 'task-list',
         component: () => import('@/views/task/TaskListView.vue'),

@@ -6,10 +6,12 @@ from sqlalchemy import func
 
 from ..constants import ENUM_GROUPS
 from ..extensions import db
-from ..models import GreenSpace, MaintenanceRecord, MaintenanceTask, PlantReplacement
+from ..models import GreenSpace, MaintenanceRecord, MaintenanceTask, Occupation, PlantReplacement
 from ..models.maintenance_task import OPEN_STATUSES
+from ..models.occupation import ACTIVE_STATUSES
 from ..utils.dates import today
 from ..utils.numbers import to_float
+from .occupation_service import OccupationService
 
 
 class StatisticsService:
@@ -31,6 +33,8 @@ class StatisticsService:
         current = today()
         month_start = current.replace(day=1)
         year_start = current.replace(month=1, day=1)
+        # 占绿期间的绿地不参与养护考核，相关逾期/临期提醒予以豁免
+        occupied_ids = OccupationService.occupied_space_ids(current)
 
         space_total, space_area = db.session.query(
             func.count(GreenSpace.id), func.coalesce(func.sum(GreenSpace.area_sqm), 0)
@@ -54,22 +58,19 @@ class StatisticsService:
             task_status[status] = count
         task_total = sum(task_status.values())
 
-        overdue = (
-            db.session.query(func.count(MaintenanceTask.id))
-            .filter(MaintenanceTask.status.in_(OPEN_STATUSES), MaintenanceTask.plan_date < current)
-            .scalar()
-            or 0
+        overdue_query = db.session.query(func.count(MaintenanceTask.id)).filter(
+            MaintenanceTask.status.in_(OPEN_STATUSES), MaintenanceTask.plan_date < current
         )
-        due_soon = (
-            db.session.query(func.count(MaintenanceTask.id))
-            .filter(
-                MaintenanceTask.status.in_(OPEN_STATUSES),
-                MaintenanceTask.plan_date >= current,
-                MaintenanceTask.plan_date <= current + timedelta(days=7),
-            )
-            .scalar()
-            or 0
+        due_soon_query = db.session.query(func.count(MaintenanceTask.id)).filter(
+            MaintenanceTask.status.in_(OPEN_STATUSES),
+            MaintenanceTask.plan_date >= current,
+            MaintenanceTask.plan_date <= current + timedelta(days=7),
         )
+        if occupied_ids:
+            overdue_query = overdue_query.filter(~MaintenanceTask.green_space_id.in_(occupied_ids))
+            due_soon_query = due_soon_query.filter(~MaintenanceTask.green_space_id.in_(occupied_ids))
+        overdue = overdue_query.scalar() or 0
+        due_soon = due_soon_query.scalar() or 0
 
         record_total, hours_total = db.session.query(
             func.count(MaintenanceRecord.id),
@@ -96,6 +97,26 @@ class StatisticsService:
             func.coalesce(func.sum(PlantReplacement.amount), 0),
         ).filter(PlantReplacement.replace_date >= year_start).one()
 
+        occupation_rows = (
+            db.session.query(Occupation.status, func.count(Occupation.id),
+                             func.coalesce(func.sum(Occupation.occupy_area_sqm), 0))
+            .group_by(Occupation.status)
+            .all()
+        )
+        occupation_status = {
+            code: {"count": 0, "area_sqm": 0.0} for code in ENUM_GROUPS["occupation_status"].values
+        }
+        for status, count, area in occupation_rows:
+            occupation_status[status] = {"count": count, "area_sqm": to_float(area) or 0}
+        occupation_active_count = sum(occupation_status[code]["count"] for code in ACTIVE_STATUSES)
+        occupation_active_area = sum(occupation_status[code]["area_sqm"] for code in ACTIVE_STATUSES)
+        occupation_overdue = (
+            db.session.query(func.count(Occupation.id))
+            .filter(Occupation.status == "approved", Occupation.end_date < current)
+            .scalar()
+            or 0
+        )
+
         completed = task_status.get("completed", 0)
         return {
             "generated_at": f"{current:%Y-%m-%d}",
@@ -103,6 +124,7 @@ class StatisticsService:
                 "total": space_total or 0,
                 "total_area": to_float(space_area) or 0,
                 "by_status": space_status,
+                "occupied_count": occupation_active_count,
             },
             "task": {
                 "total": task_total,
@@ -127,6 +149,13 @@ class StatisticsService:
                 "month_amount": to_float(month_amount) or 0,
                 "year_quantity": to_float(year_quantity) or 0,
                 "year_amount": to_float(year_amount) or 0,
+            },
+            "occupation": {
+                "by_status": occupation_status,
+                "active_count": occupation_active_count,
+                "active_area_sqm": to_float(occupation_active_area) or 0,
+                "overdue_restore_count": occupation_overdue,
+                "excluded_green_space_count": len(occupied_ids),
             },
         }
 
@@ -300,13 +329,16 @@ class StatisticsService:
     # ------------------------------------------------------------ 榜单与提醒
     @staticmethod
     def green_space_ranking(limit=5):
+        """养护工作量排名：占绿期间的绿地不参与养护考核，予以排除。"""
+
+        occupied_ids = OccupationService.occupied_space_ids()
         replacement_quantity = (
             db.select(func.coalesce(func.sum(PlantReplacement.quantity), 0))
             .where(PlantReplacement.green_space_id == GreenSpace.id)
             .correlate(GreenSpace)
             .scalar_subquery()
         )
-        rows = (
+        query = (
             db.session.query(
                 GreenSpace.id,
                 GreenSpace.code,
@@ -321,9 +353,10 @@ class StatisticsService:
             .group_by(GreenSpace.id, GreenSpace.code, GreenSpace.name, GreenSpace.district,
                       GreenSpace.area_sqm)
             .order_by(func.count(MaintenanceRecord.id).desc())
-            .limit(limit)
-            .all()
         )
+        if occupied_ids:
+            query = query.filter(~GreenSpace.id.in_(occupied_ids))
+        rows = query.limit(limit).all()
         return [
             {
                 "green_space_id": space_id,
@@ -340,31 +373,58 @@ class StatisticsService:
 
     @staticmethod
     def overdue_tasks(limit=10):
-        tasks = (
+        occupied_ids = OccupationService.occupied_space_ids()
+        query = (
             db.session.query(MaintenanceTask)
             .filter(
                 MaintenanceTask.status.in_(OPEN_STATUSES),
                 MaintenanceTask.plan_date < today(),
             )
             .order_by(MaintenanceTask.plan_date.asc())
-            .limit(limit)
-            .all()
         )
+        if occupied_ids:
+            query = query.filter(~MaintenanceTask.green_space_id.in_(occupied_ids))
+        tasks = query.limit(limit).all()
         return [task.to_dict() for task in tasks]
 
     @staticmethod
     def upcoming_tasks(limit=10):
-        tasks = (
+        occupied_ids = OccupationService.occupied_space_ids()
+        query = (
             db.session.query(MaintenanceTask)
             .filter(
                 MaintenanceTask.status.in_(OPEN_STATUSES),
                 MaintenanceTask.plan_date >= today(),
             )
             .order_by(MaintenanceTask.plan_date.asc())
+        )
+        if occupied_ids:
+            query = query.filter(~MaintenanceTask.green_space_id.in_(occupied_ids))
+        tasks = query.limit(limit).all()
+        return [task.to_dict() for task in tasks]
+
+    @staticmethod
+    def occupation_reminders(limit=10):
+        """占绿到期未恢复提醒，以及待核验记录。"""
+
+        overdue = (
+            db.session.query(Occupation)
+            .filter(Occupation.status == "approved", Occupation.end_date < today())
+            .order_by(Occupation.end_date.asc())
             .limit(limit)
             .all()
         )
-        return [task.to_dict() for task in tasks]
+        pending_verify = (
+            db.session.query(Occupation)
+            .filter(Occupation.status == "restored")
+            .order_by(Occupation.restored_date.asc())
+            .limit(limit)
+            .all()
+        )
+        return {
+            "overdue_restore": [item.to_dict() for item in overdue],
+            "pending_verify": [item.to_dict() for item in pending_verify],
+        }
 
     @staticmethod
     def recent_activity(limit=6):
@@ -398,4 +458,5 @@ class StatisticsService:
             "overdue_tasks": StatisticsService.overdue_tasks(),
             "upcoming_tasks": StatisticsService.upcoming_tasks(),
             "recent_activity": StatisticsService.recent_activity(),
+            "occupation_reminders": StatisticsService.occupation_reminders(),
         }

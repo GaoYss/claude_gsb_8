@@ -4,6 +4,7 @@ from .green_spaces import bp as green_spaces_bp
 from .maintenance_records import bp as maintenance_records_bp
 from .maintenance_tasks import bp as maintenance_tasks_bp
 from .meta import bp as meta_bp
+from .occupations import bp as occupations_bp
 from .plant_replacements import bp as plant_replacements_bp
 from .statistics import bp as statistics_bp
 
@@ -13,6 +14,7 @@ BLUEPRINTS = (
     maintenance_tasks_bp,
     maintenance_records_bp,
     plant_replacements_bp,
+    occupations_bp,
     statistics_bp,
 )
 

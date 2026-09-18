@@ -16,6 +16,7 @@ from .services import (
     GreenSpaceService,
     MaintenanceRecordService,
     MaintenanceTaskService,
+    OccupationService,
     PlantReplacementService,
 )
 
@@ -207,7 +208,8 @@ def seed_command(reset, seed_value):
     summary = generate_demo_data(random.Random(seed_value))
     click.echo(
         "演示数据写入完成：绿地 {green_space} 处、养护任务 {maintenance_task} 条、"
-        "养护记录 {maintenance_record} 条、绿植更换 {plant_replacement} 条".format(**summary)
+        "养护记录 {maintenance_record} 条、绿植更换 {plant_replacement} 条、"
+        "占绿记录 {green_space_occupation} 条".format(**summary)
     )
 
 
@@ -220,11 +222,14 @@ def generate_demo_data(rng):
         "maintenance_task": 0,
         "maintenance_record": 0,
         "plant_replacement": 0,
+        "green_space_occupation": 0,
     }
+    created_spaces = []
 
     for index, space_seed in enumerate(SPACE_SEEDS):
         payload = dict(space_seed)
         space = GreenSpaceService.create(payload)
+        created_spaces.append(space)
         counts["green_space"] += 1
 
         # 已归档绿地不允许再登记任务与记录，仅保留台账
@@ -323,5 +328,119 @@ def generate_demo_data(rng):
         })
         counts["maintenance_task"] += 1
 
+    counts["green_space_occupation"] = _seed_occupations(created_spaces, today_)
+
     db.session.commit()
     return counts
+
+
+def _seed_occupations(spaces, today_):
+    """写入覆盖全部状态的占绿记录：审批通过、到期未恢复、待核验、核验通过、驳回、待审批。"""
+
+    # 已归档绿地不能申请占用
+    usable = [space for space in spaces if space.status != "archived"]
+    if len(usable) < 6:
+        return 0
+
+    def register(space, reason, purpose, area, start, end, **extra):
+        return OccupationService.create({
+            "green_space_id": space.id,
+            "reason": reason,
+            "purpose": purpose,
+            "scope_description": extra.get("scope", "沿占用红线围挡施工，保留人行通道。"),
+            "occupy_area_sqm": area,
+            "start_date": start,
+            "end_date": end,
+            "applicant": extra.get("applicant", "杭州市市政工程建设中心"),
+            "applicant_phone": "0571-88001122",
+            "apply_date": start - timedelta(days=10),
+            "restore_requirement": extra.get(
+                "require", "占用期满拆除临时设施，按原苗木规格恢复绿化并平整场地。"
+            ),
+        })
+
+    created = 0
+
+    # 1. 占绿中（当前在占用期限内）：该绿地占绿期间不参与养护考核
+    active = register(
+        usable[1], "construction", "地铁出入口配套施工临时占用绿地", 3200,
+        today_ - timedelta(days=20), today_ + timedelta(days=40),
+        applicant="杭州地铁集团有限责任公司",
+    )
+    OccupationService.approve(active.id, {
+        "action": "approved", "approved_by": "绿化审批处·方骏",
+        "approval_remark": "同意占用，到期前完成恢复并申请核验。",
+    })
+    created += 1
+
+    # 2. 占绿到期未恢复：产生逾期提醒
+    overdue = register(
+        usable[3], "utility", "燃气管道迁改开挖占用小区附属绿地", 900,
+        today_ - timedelta(days=70), today_ - timedelta(days=10),
+        applicant="杭州燃气集团有限公司",
+    )
+    OccupationService.approve(overdue.id, {
+        "action": "approved", "approved_by": "绿化审批处·方骏",
+        "approval_remark": "同意占用，请限期恢复。",
+    })
+    created += 1
+
+    # 3. 已报备恢复，待核验
+    restored = register(
+        usable[4], "traffic", "人行天桥桩基施工占用樱花大道边缘绿地", 1400,
+        today_ - timedelta(days=55), today_ - timedelta(days=5),
+        applicant="杭州市城市建设投资集团",
+    )
+    OccupationService.approve(restored.id, {
+        "action": "approved", "approved_by": "绿化审批处·方骏",
+    })
+    OccupationService.report_restore(restored.id, {
+        "restored_date": today_ - timedelta(days=3),
+        "restored_area_sqm": 1400,
+        "restored_plants": "恢复染井吉野樱 12 株（胸径 10-12cm），补植时令花卉 800 平方米、草坪 600 平方米。",
+        "restore_remark": "临时围挡与硬化已破除，场地平整回填种植土。",
+    })
+    created += 1
+
+    # 4. 核验通过：完整的审批-占用-恢复-核验履历
+    verified = register(
+        usable[0], "event", "国庆花展临时占用广场布置展区", 600,
+        today_ - timedelta(days=120), today_ - timedelta(days=100),
+        applicant="杭州市园林绿化发展中心",
+    )
+    OccupationService.approve(verified.id, {
+        "action": "approved", "approved_by": "绿化审批处·方骏",
+        "approval_remark": "花展结束后一周内恢复。",
+    })
+    OccupationService.report_restore(verified.id, {
+        "restored_date": today_ - timedelta(days=96),
+        "restored_area_sqm": 600,
+        "restored_plants": "恢复时令花坛 420 平方米、红叶石楠球 18 株，长势正常。",
+    })
+    OccupationService.verify(verified.id, {
+        "verified_by": "绿化监管处·高敏",
+        "verify_remark": "恢复面积与苗木规格符合审批要求，核验通过。",
+    })
+    created += 1
+
+    # 5. 已驳回
+    rejected = register(
+        usable[2], "other", "申请长期占用道路绿地设置材料堆场", 500,
+        today_ + timedelta(days=5), today_ + timedelta(days=65),
+        applicant="某道路施工项目部",
+    )
+    OccupationService.approve(rejected.id, {
+        "action": "rejected", "approved_by": "绿化审批处·方骏",
+        "approval_remark": "占用范围超出施工红线且材料堆场不宜设置于绿地，不予批准。",
+    })
+    created += 1
+
+    # 6. 待审批
+    register(
+        usable[5], "utility", "供水管网改造拟临时占用立体绿化试点边缘绿地", 300,
+        today_ + timedelta(days=8), today_ + timedelta(days=38),
+        applicant="杭州市水务集团",
+    )
+    created += 1
+
+    return created

@@ -3,12 +3,25 @@
     <PageHeader :title="space.name || '绿地档案'" :description="`绿地编号 ${space.code || '-'}`">
       <template #tag>
         <EnumTag v-if="space.status" group="green_space_status" :value="space.status" :label="space.status_label" />
+        <el-tooltip v-if="space.is_occupied"
+                    :content="`占绿编号 ${space.occupation_no}，至 ${formatDate(space.occupation_until)}，期间不参与养护考核`">
+          <el-tag type="warning" effect="dark">占绿中</el-tag>
+        </el-tooltip>
       </template>
       <template #actions>
         <el-button :icon="'Back'" @click="router.push('/green-spaces')">返回台账</el-button>
+        <el-button type="warning" plain :icon="'Stamp'"
+                   @click="router.push({ name: 'occupation-list', query: { green_space_id: route.params.id } })">
+          占绿审批
+        </el-button>
         <el-button type="primary" :icon="'Edit'" @click="formDialog.open(space)">编辑台账</el-button>
       </template>
     </PageHeader>
+
+    <el-alert v-if="activeOccupation" type="warning" :closable="false" show-icon class="occupy-alert"
+              :title="`该绿地占绿中（${activeOccupation.occupation_no}），占绿期间不参与养护考核`"
+              :description="`占用事由：${activeOccupation.reason_label} · ${activeOccupation.purpose}；占用期限 ${formatDate(activeOccupation.start_date)} 至 ${formatDate(activeOccupation.end_date)}；恢复要求：${activeOccupation.restore_requirement || '见审批单'}`"
+              @click="occupationDrawer.open(activeOccupation.id)" />
 
     <div class="panel">
       <el-descriptions :column="3" border>
@@ -127,10 +140,40 @@
             </el-tag>
           </div>
         </el-tab-pane>
+
+        <el-tab-pane label="占绿记录" name="occupations">
+          <div class="tab-actions">
+            <el-button link type="primary" @click="goList('occupations')">查看全部占绿记录</el-button>
+          </div>
+          <el-table :data="recentOccupations" size="small" empty-text="暂无占绿记录">
+            <el-table-column prop="occupation_no" label="占绿编号" width="160" />
+            <el-table-column label="占用事由" width="120">
+              <template #default="{ row }">
+                <EnumTag group="occupation_reason" :value="row.reason" :label="row.reason_label" />
+              </template>
+            </el-table-column>
+            <el-table-column prop="purpose" label="事由说明" min-width="180" show-overflow-tooltip />
+            <el-table-column label="占用面积" width="110" align="right">
+              <template #default="{ row }">{{ formatArea(row.occupy_area_sqm) }}</template>
+            </el-table-column>
+            <el-table-column prop="end_date" label="占用至" width="110" />
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <EnumTag group="occupation_status" :value="row.status" :label="row.status_label" />
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="90">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="occupationDrawer.open(row.id)">详情</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
       </el-tabs>
     </div>
 
     <GreenSpaceFormDialog ref="formDialog" @saved="load" />
+    <OccupationDetailDrawer ref="occupationDrawer" @updated="load" />
   </div>
 </template>
 
@@ -145,10 +188,12 @@ import StatCard from '@/components/common/StatCard.vue'
 import { formatArea, formatCurrency, formatDate, formatHours, formatNumber } from '@/utils/format'
 
 import GreenSpaceFormDialog from './GreenSpaceFormDialog.vue'
+import OccupationDetailDrawer from '../occupation/OccupationDetailDrawer.vue'
 
 const route = useRoute()
 const router = useRouter()
 const formDialog = ref(null)
+const occupationDrawer = ref(null)
 const loading = ref(false)
 const activeTab = ref('tasks')
 
@@ -157,7 +202,9 @@ const statistics = ref({ task_status: {}, record_count: 0, total_work_hours: 0, 
 const recentTasks = ref([])
 const recentRecords = ref([])
 const recentReplacements = ref([])
+const recentOccupations = ref([])
 const replacementSummary = ref([])
+const activeOccupation = ref(null)
 
 const taskTotal = computed(() =>
   Object.values(statistics.value.task_status || {}).reduce((sum, value) => sum + value, 0),
@@ -172,7 +219,9 @@ async function load() {
     recentTasks.value = data.recent_tasks || []
     recentRecords.value = data.recent_records || []
     recentReplacements.value = data.recent_replacements || []
+    recentOccupations.value = data.recent_occupations || []
     replacementSummary.value = data.replacement_summary || []
+    activeOccupation.value = data.active_occupation || null
   } finally {
     loading.value = false
   }
@@ -182,6 +231,7 @@ const LIST_ROUTES = {
   tasks: 'task-list',
   records: 'record-list',
   replacements: 'replacement-list',
+  occupations: 'occupation-list',
 }
 
 function goList(name) {
@@ -192,6 +242,10 @@ onMounted(load)
 </script>
 
 <style scoped>
+.occupy-alert {
+  cursor: pointer;
+}
+
 .tab-actions {
   display: flex;
   justify-content: flex-end;

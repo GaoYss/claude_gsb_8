@@ -36,6 +36,32 @@ class GreenSpace(TimestampMixin, db.Model):
     replacements = db.relationship(
         "PlantReplacement", back_populates="green_space", cascade="all, delete-orphan"
     )
+    occupations = db.relationship(
+        "Occupation", back_populates="green_space", cascade="all, delete-orphan",
+        lazy="selectin", order_by="Occupation.apply_date.desc()",
+    )
+
+    @property
+    def active_occupation(self):
+        """当前生效中的占绿记录（已到开始日期的占绿中 / 待核验），无则 None。"""
+
+        from ..utils.dates import today as _today
+        from .occupation import ACTIVE_STATUSES as _ACTIVE
+
+        current = _today()
+        for occupation in self.occupations:
+            if occupation.status not in _ACTIVE:
+                continue
+            # 待核验说明现场已恢复但尚未解除占绿；占绿中需已到达占用开始日期
+            if occupation.status == "restored" or occupation.start_date <= current:
+                return occupation
+        return None
+
+    @property
+    def is_occupied(self):
+        """是否处于占绿状态：占绿期间该绿地不参与养护考核。"""
+
+        return self.active_occupation is not None
 
     def to_brief(self):
         """下拉框与关联展示用的精简结构。"""
@@ -48,6 +74,7 @@ class GreenSpace(TimestampMixin, db.Model):
         }
 
     def to_dict(self, detail=False):
+        active_occupation = self.active_occupation
         data = {
             "id": self.id,
             "code": self.code,
@@ -61,6 +88,9 @@ class GreenSpace(TimestampMixin, db.Model):
             "area_sqm": to_float(self.area_sqm),
             "status": self.status,
             "status_label": GREEN_SPACE_STATUS.label(self.status),
+            "is_occupied": active_occupation is not None,
+            "occupation_no": active_occupation.occupation_no if active_occupation else None,
+            "occupation_until": format_date(active_occupation.end_date) if active_occupation else None,
             "manager": self.manager,
             "contact_phone": self.contact_phone,
             "established_date": format_date(self.established_date),

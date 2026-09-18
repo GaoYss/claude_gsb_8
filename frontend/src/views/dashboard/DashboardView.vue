@@ -50,6 +50,14 @@
         tone="info"
         icon="Money"
       />
+      <StatCard
+        label="占绿生效中"
+        :value="formatNumber(overview.occupation.active_count)"
+        unit="处绿地"
+        :hint="`占用面积 ${formatArea(overview.occupation.active_area_sqm)}，到期未恢复 ${overview.occupation.overdue_restore_count} 条`"
+        :tone="overview.occupation.overdue_restore_count ? 'danger' : 'warning'"
+        icon="WarningFilled"
+      />
     </div>
 
     <div class="chart-grid">
@@ -150,6 +158,41 @@
         </el-table>
       </div>
     </div>
+    <div class="dashboard-columns">
+      <div class="panel">
+        <div class="table-toolbar">
+          <span class="panel-title">占绿到期未恢复</span>
+          <el-link type="primary" :underline="false" @click="router.push('/occupations')">进入占绿审批</el-link>
+        </div>
+        <el-table :data="dashboard.occupation_reminders.overdue_restore" size="small" empty-text="暂无到期未恢复">
+          <el-table-column prop="occupation_no" label="占绿编号" width="150" />
+          <el-table-column label="绿地" min-width="140">
+            <template #default="{ row }">{{ row.green_space?.name || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="end_date" label="占用至" width="110" />
+          <el-table-column label="占用面积" width="100" align="right">
+            <template #default="{ row }">{{ formatArea(row.occupy_area_sqm) }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+
+      <div class="panel">
+        <div class="table-toolbar">
+          <span class="panel-title">恢复待核验</span>
+          <el-link type="primary" :underline="false" @click="router.push('/occupations')">进入占绿审批</el-link>
+        </div>
+        <el-table :data="dashboard.occupation_reminders.pending_verify" size="small" empty-text="暂无待核验记录">
+          <el-table-column prop="occupation_no" label="占绿编号" width="150" />
+          <el-table-column label="绿地" min-width="140">
+            <template #default="{ row }">{{ row.green_space?.name || '-' }}</template>
+          </el-table-column>
+          <el-table-column prop="restored_date" label="恢复日期" width="110" />
+          <el-table-column label="恢复面积" width="100" align="right">
+            <template #default="{ row }">{{ formatArea(row.restored_area_sqm) }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -163,7 +206,6 @@ import EnumTag from '@/components/common/EnumTag.vue'
 import PageHeader from '@/components/common/PageHeader.vue'
 import StatCard from '@/components/common/StatCard.vue'
 import { formatArea, formatCurrency, formatHours, formatNumber, formatPercent, today } from '@/utils/format'
-
 import { barOption, pieOption, trendOption } from './chartOptions'
 
 const router = useRouter()
@@ -173,10 +215,11 @@ const dashboard = ref(emptyDashboard())
 function emptyDashboard() {
   return {
     overview: {
-      green_space: { total: 0, total_area: 0, by_status: {} },
+      green_space: { total: 0, total_area: 0, by_status: {}, occupied_count: 0 },
       task: { total: 0, open_count: 0, overdue_count: 0, due_soon_count: 0, completion_rate: 0, by_status: {} },
       record: { total: 0, month_count: 0, month_work_hours: 0, total_work_hours: 0 },
       replacement: { total: 0, month_count: 0, month_quantity: 0, month_amount: 0, year_amount: 0, total_amount: 0 },
+      occupation: { active_count: 0, active_area_sqm: 0, overdue_restore_count: 0, by_status: {}, excluded_green_space_count: 0 },
     },
     distributions: {
       green_space_by_type: [],
@@ -189,6 +232,7 @@ function emptyDashboard() {
     overdue_tasks: [],
     upcoming_tasks: [],
     recent_activity: { records: [], replacements: [] },
+    occupation_reminders: { overdue_restore: [], pending_verify: [] },
   }
 }
 

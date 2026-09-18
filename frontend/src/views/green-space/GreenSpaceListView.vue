@@ -46,7 +46,12 @@
         <el-table-column prop="code" label="绿地编号" width="135" />
         <el-table-column label="绿地名称" min-width="170" show-overflow-tooltip>
           <template #default="{ row }">
-            <div class="cell-main">{{ row.name }}</div>
+            <div class="cell-main">
+              {{ row.name }}
+              <el-tooltip v-if="row.is_occupied" :content="`占绿中（${row.occupation_no}），期间不参与养护考核，至 ${formatDate(row.occupation_until)}`">
+                <el-tag type="warning" size="small" effect="dark" class="occupy-tag">占绿</el-tag>
+              </el-tooltip>
+            </div>
             <div class="cell-sub">负责人：{{ row.manager || '未指定' }}</div>
           </template>
         </el-table-column>
@@ -77,6 +82,9 @@
             </span>
             <div class="summary-text">
               最近养护：{{ formatDate(row.statistics.last_maintenance_date) }}
+              <el-tag v-if="row.statistics.occupation_count" type="warning" size="small" effect="plain">
+                占绿记录 {{ row.statistics.occupation_count }}
+              </el-tag>
             </div>
           </template>
         </el-table-column>
@@ -184,6 +192,11 @@ onMounted(loadDistricts)
 
 .cell-main {
   font-weight: 500;
+}
+
+.occupy-tag {
+  margin-left: 6px;
+  vertical-align: middle;
 }
 
 .cell-sub {

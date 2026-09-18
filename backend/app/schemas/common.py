@@ -34,6 +34,7 @@ class PayloadValidator:
         self.raw = data
         self.clean = {}
         self.errors = {}
+        self._checks = []
 
     # ------------------------------------------------------------ 内部工具
     def _fail(self, field, message):
@@ -158,7 +159,16 @@ class PayloadValidator:
         self.clean[field] = number
         return self
 
+    def check(self, condition, field, message):
+        """跨字段校验：延迟到各字段解析完成后、done() 时统一判断。"""
+
+        self._checks.append((condition, field, message))
+        return self
+
     def done(self):
+        for condition, field, message in self._checks:
+            if field not in self.errors and condition():
+                self._fail(field, message)
         if self.errors:
             raise ValidationError("提交的数据未通过校验", details=self.errors)
         return self.clean
