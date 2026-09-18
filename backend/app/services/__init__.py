@@ -1,5 +1,6 @@
 """业务服务层：承接接口层传入的已校验数据，负责事务与跨模块业务规则。"""
 
+from .green_occupation_service import GreenOccupationService
 from .green_space_service import GreenSpaceService
 from .maintenance_record_service import MaintenanceRecordService
 from .maintenance_task_service import MaintenanceTaskService
@@ -11,5 +12,6 @@ __all__ = [
     "MaintenanceTaskService",
     "MaintenanceRecordService",
     "PlantReplacementService",
+    "GreenOccupationService",
     "StatisticsService",
 ]

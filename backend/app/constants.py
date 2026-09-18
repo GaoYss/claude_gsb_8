@@ -48,6 +48,7 @@ MAINTENANCE_GRADE = EnumGroup("maintenance_grade", [
 
 GREEN_SPACE_STATUS = EnumGroup("green_space_status", [
     ("normal", "正常养护"),
+    ("occupied", "占绿中"),
     ("repairing", "整治提升中"),
     ("suspended", "暂停养护"),
     ("archived", "已归档"),
@@ -130,6 +131,32 @@ MEASURE_UNIT = EnumGroup("measure_unit", [
     ("clump", "丛"),
 ])
 
+# ---------------------------------------------------------------- 绿地占用
+OCCUPATION_CATEGORY = EnumGroup("occupation_category", [
+    ("construction", "施工建设"),
+    ("pipeline", "管线敷设"),
+    ("event", "临时活动"),
+    ("storage", "堆料临建"),
+    ("other", "其他占用"),
+])
+
+OCCUPATION_STATUS = EnumGroup("occupation_status", [
+    ("pending", "待审批"),
+    ("approved", "占绿中"),
+    ("rejected", "已驳回"),
+    ("completed", "已恢复"),
+])
+
+VERIFY_RESULT = EnumGroup("verify_result", [
+    ("qualified", "核验合格"),
+    ("unqualified", "核验不合格"),
+])
+
+APPROVAL_RESULT = EnumGroup("approval_result", [
+    ("approved", "批准占用"),
+    ("rejected", "驳回申请"),
+])
+
 # 前端下拉与文档共用的一份字典清单
 ENUM_GROUPS = {
     "green_space_type": GREEN_SPACE_TYPE,
@@ -144,6 +171,10 @@ ENUM_GROUPS = {
     "replacement_reason": REPLACEMENT_REASON,
     "old_plant_status": OLD_PLANT_STATUS,
     "measure_unit": MEASURE_UNIT,
+    "occupation_category": OCCUPATION_CATEGORY,
+    "occupation_status": OCCUPATION_STATUS,
+    "verify_result": VERIFY_RESULT,
+    "approval_result": APPROVAL_RESULT,
 }
 
 

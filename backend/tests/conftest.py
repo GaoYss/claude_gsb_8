@@ -151,6 +151,28 @@ def make_replacement(make_space):
 
 
 @pytest.fixture()
+def make_occupation(make_space):
+    from app.services import GreenOccupationService
+
+    def _make(space=None, **overrides):
+        space = space or make_space()
+        payload = {
+            "green_space_id": space.id,
+            "applicant": "某建设工程公司",
+            "category": "construction",
+            "reason": "地铁施工临时占用绿化带",
+            "area_sqm": 200,
+            "start_date": date(2026, 3, 1),
+            "end_date": date(2026, 9, 30),
+            "restoration_requirement": "占用结束后恢复绿化带原貌，苗木成活率不低于 95%",
+        }
+        payload.update(overrides)
+        return GreenOccupationService.create(payload)
+
+    return _make
+
+
+@pytest.fixture()
 def seeded(app):
     """写入演示数据（固定随机种子，保证断言稳定）。"""
 

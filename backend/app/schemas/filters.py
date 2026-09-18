@@ -110,3 +110,22 @@ def replacement_filters(args):
     filters["date_from"] = _date(args, "date_from")
     filters["date_to"] = _date(args, "date_to")
     return filters
+
+
+def occupation_filters(args):
+    filters = {}
+    green_space_id = _int(args, "green_space_id")
+    if green_space_id:
+        filters["green_space_id"] = green_space_id
+    for key, group_key in (("status", "occupation_status"),
+                           ("category", "occupation_category")):
+        value = _enum(args, key, group_key)
+        if value:
+            filters[key] = value
+    keyword = _text(args, "keyword")
+    if keyword:
+        filters["keyword"] = keyword
+    filters["date_from"] = _date(args, "date_from")
+    filters["date_to"] = _date(args, "date_to")
+    filters["expired"] = _flag(args, "expired")
+    return filters

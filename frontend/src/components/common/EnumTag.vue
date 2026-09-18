@@ -15,12 +15,14 @@ const props = defineProps({
 })
 
 const TAG_TYPES = {
-  green_space_status: { normal: 'success', repairing: 'warning', suspended: 'info', archived: 'info' },
+  green_space_status: { normal: 'success', occupied: 'warning', repairing: 'warning', suspended: 'info', archived: 'info' },
   task_status: { pending: 'info', in_progress: 'primary', completed: 'success', cancelled: 'danger' },
   task_priority: { low: 'info', medium: 'primary', high: 'warning', urgent: 'danger' },
   quality_result: { qualified: 'success', pending: 'warning', unqualified: 'danger' },
   maintenance_grade: { level1: 'success', level2: 'primary', level3: 'info' },
   replacement_reason: { dead: 'danger', disease: 'warning', aging: 'info', upgrade: 'primary' },
+  occupation_status: { pending: 'info', approved: 'warning', rejected: 'danger', completed: 'success' },
+  verify_result: { qualified: 'success', unqualified: 'danger' },
 }
 
 const meta = useMetaStore()

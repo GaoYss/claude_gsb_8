@@ -13,6 +13,7 @@ from flask.cli import with_appcontext
 from .extensions import db
 from .models import GreenSpace
 from .services import (
+    GreenOccupationService,
     GreenSpaceService,
     MaintenanceRecordService,
     MaintenanceTaskService,
@@ -207,7 +208,8 @@ def seed_command(reset, seed_value):
     summary = generate_demo_data(random.Random(seed_value))
     click.echo(
         "演示数据写入完成：绿地 {green_space} 处、养护任务 {maintenance_task} 条、"
-        "养护记录 {maintenance_record} 条、绿植更换 {plant_replacement} 条".format(**summary)
+        "养护记录 {maintenance_record} 条、绿植更换 {plant_replacement} 条、"
+        "占用登记 {green_space_occupation} 条".format(**summary)
     )
 
 
@@ -220,6 +222,7 @@ def generate_demo_data(rng):
         "maintenance_task": 0,
         "maintenance_record": 0,
         "plant_replacement": 0,
+        "green_space_occupation": 0,
     }
 
     for index, space_seed in enumerate(SPACE_SEEDS):
@@ -323,5 +326,108 @@ def generate_demo_data(rng):
         })
         counts["maintenance_task"] += 1
 
+    counts["green_space_occupation"] += _seed_occupations(today_)
+
     db.session.commit()
     return counts
+
+
+def _seed_occupations(today_):
+    """占用登记演示数据：覆盖待审批、占绿中、已恢复、已驳回四种状态。"""
+
+    spaces = {space.name: space for space in db.session.query(GreenSpace).all()}
+    created = 0
+
+    def _create(space_name, payload):
+        nonlocal created
+        space = spaces.get(space_name)
+        if space is None:
+            return None
+        occupation = GreenOccupationService.create({"green_space_id": space.id, **payload})
+        created += 1
+        return occupation
+
+    # 占绿中：地铁施工占用，绿地台账同步标记为占绿状态
+    occupation = _create("文一西路沿线绿地", {
+        "applicant": "杭州地铁集团建设分公司",
+        "contact_phone": "0571-86001122",
+        "category": "construction",
+        "reason": "地铁 19 号线文一西路站主体结构施工，需临时占用道路两侧绿化带",
+        "location_desc": "文一西路与荆长大道交叉口东南侧绿化带",
+        "area_sqm": 1200,
+        "start_date": today_ - timedelta(days=30),
+        "end_date": today_ + timedelta(days=60),
+        "restoration_requirement": "施工结束后 30 日内恢复绿化带原貌，补植金森女贞色块 1200 ㎡，"
+                                   "苗木成活率不低于 95%，恢复期间由申请单位负责养护。",
+        "operator": "陈立群",
+        "remark": "已缴纳绿化补偿费，施工围挡按规范设置。",
+    })
+    if occupation is not None:
+        GreenOccupationService.approve(occupation.id, {
+            "result": "approved",
+            "approved_by": "市园林文物局审批处",
+            "approval_comment": "同意临时占用，期满须按恢复要求及时恢复。",
+        })
+
+    # 待审批：燃气管道改造占用申请
+    _create("西溪里小区附属绿地", {
+        "applicant": "杭州燃气集团工程部",
+        "contact_phone": "0571-88190000",
+        "category": "pipeline",
+        "reason": "小区燃气管道更新改造，需开挖北侧绿地敷设管线",
+        "location_desc": "小区北侧沿围墙绿地",
+        "area_sqm": 300,
+        "start_date": today_ + timedelta(days=10),
+        "end_date": today_ + timedelta(days=40),
+        "restoration_requirement": "管线敷设完成后回填夯实，恢复桂花 6 株与八角金盘地被 300 ㎡。",
+        "operator": "周雯",
+    })
+
+    # 已恢复：新春市集临时占用，恢复核验合格
+    occupation = _create("武林广场中轴绿地", {
+        "applicant": "下城区商业发展公司",
+        "contact_phone": "0571-85012345",
+        "category": "event",
+        "reason": "新春市集活动临时占用广场南侧绿地搭建展位",
+        "location_desc": "武林广场南侧花坛区域",
+        "area_sqm": 500,
+        "start_date": today_ - timedelta(days=90),
+        "end_date": today_ - timedelta(days=60),
+        "restoration_requirement": "活动结束后拆除展位，恢复时令花坛 500 ㎡，一周内完成。",
+        "operator": "沈建国",
+    })
+    if occupation is not None:
+        GreenOccupationService.approve(occupation.id, {
+            "result": "approved",
+            "approved_by": "市园林文物局审批处",
+            "approval_comment": "同意活动期间临时占用，结束后立即恢复。",
+        })
+        GreenOccupationService.verify(occupation.id, {
+            "verify_result": "qualified",
+            "restored_area_sqm": 500,
+            "plant_restoration": "展位已拆除，时令花坛按原样恢复 500 ㎡，花卉长势良好。",
+            "verified_by": "沈建国",
+            "verify_comment": "恢复面积与苗木情况均符合要求，核验合格。",
+        })
+
+    # 已驳回：樱花季堆料申请被驳回
+    occupation = _create("滨江公园樱花大道", {
+        "applicant": "滨江区政园林工程队",
+        "contact_phone": "0571-86600001",
+        "category": "storage",
+        "reason": "附近道路改造工程申请在樱花大道东段绿地临时堆放建材",
+        "location_desc": "樱花大道东段入口绿地",
+        "area_sqm": 200,
+        "start_date": today_ + timedelta(days=5),
+        "end_date": today_ + timedelta(days=65),
+        "restoration_requirement": "堆料清除后恢复草坪 200 ㎡。",
+        "operator": "林轶",
+    })
+    if occupation is not None:
+        GreenOccupationService.approve(occupation.id, {
+            "result": "rejected",
+            "approved_by": "市园林文物局审批处",
+            "approval_comment": "樱花季期间人流密集，不允许占用绿地堆放建材，建议另行选址。",
+        })
+
+    return created

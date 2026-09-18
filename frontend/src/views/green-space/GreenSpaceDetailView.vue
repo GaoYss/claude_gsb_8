@@ -10,6 +10,20 @@
       </template>
     </PageHeader>
 
+    <el-alert v-if="currentOccupation" type="warning" :closable="false" show-icon class="occupation-alert">
+      <template #title>
+        占绿中：{{ currentOccupation.reason }}（占用 {{ formatNumber(currentOccupation.area_sqm) }} ㎡，
+        {{ formatDate(currentOccupation.start_date) }} ~ {{ formatDate(currentOccupation.end_date) }}），
+        占绿期间该绿地不参与养护考核
+        <el-tag v-if="currentOccupation.is_expired" type="danger" size="small" effect="dark"
+                class="occupation-alert__tag">已超期</el-tag>
+      </template>
+      <template #default>
+        申请单位/人：{{ currentOccupation.applicant }} · 恢复要求：{{ currentOccupation.restoration_requirement || '-' }}
+        <el-button link type="primary" @click="goList('occupations')">查看占用登记</el-button>
+      </template>
+    </el-alert>
+
     <div class="panel">
       <el-descriptions :column="3" border>
         <el-descriptions-item label="所属行政区">{{ space.district || '-' }}</el-descriptions-item>
@@ -127,6 +141,33 @@
             </el-tag>
           </div>
         </el-tab-pane>
+        <el-tab-pane label="近期占用登记" name="occupations">
+          <div class="tab-actions">
+            <el-button link type="primary" @click="goList('occupations')">查看全部占用登记</el-button>
+          </div>
+          <el-table :data="recentOccupations" size="small" empty-text="暂无占用登记">
+            <el-table-column prop="occupation_no" label="占用编号" width="160" />
+            <el-table-column prop="reason" label="占用事由" min-width="200" show-overflow-tooltip />
+            <el-table-column label="占用面积" width="110" align="right">
+              <template #default="{ row }">{{ formatNumber(row.area_sqm) }} ㎡</template>
+            </el-table-column>
+            <el-table-column label="占用期限" width="200">
+              <template #default="{ row }">{{ row.start_date }} ~ {{ row.end_date }}</template>
+            </el-table-column>
+            <el-table-column label="状态" width="100">
+              <template #default="{ row }">
+                <EnumTag group="occupation_status" :value="row.status" :label="row.status_label" />
+              </template>
+            </el-table-column>
+            <el-table-column label="核验结论" width="105">
+              <template #default="{ row }">
+                <EnumTag v-if="row.verify_result" group="verify_result" :value="row.verify_result"
+                         :label="row.verify_result_label" />
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-tab-pane>
       </el-tabs>
     </div>
 
@@ -158,6 +199,8 @@ const recentTasks = ref([])
 const recentRecords = ref([])
 const recentReplacements = ref([])
 const replacementSummary = ref([])
+const currentOccupation = ref(null)
+const recentOccupations = ref([])
 
 const taskTotal = computed(() =>
   Object.values(statistics.value.task_status || {}).reduce((sum, value) => sum + value, 0),
@@ -173,6 +216,8 @@ async function load() {
     recentRecords.value = data.recent_records || []
     recentReplacements.value = data.recent_replacements || []
     replacementSummary.value = data.replacement_summary || []
+    currentOccupation.value = data.current_occupation || null
+    recentOccupations.value = data.recent_occupations || []
   } finally {
     loading.value = false
   }
@@ -182,6 +227,7 @@ const LIST_ROUTES = {
   tasks: 'task-list',
   records: 'record-list',
   replacements: 'replacement-list',
+  occupations: 'occupation-list',
 }
 
 function goList(name) {
@@ -192,6 +238,14 @@ onMounted(load)
 </script>
 
 <style scoped>
+.occupation-alert {
+  margin-bottom: 16px;
+}
+
+.occupation-alert__tag {
+  margin-left: 6px;
+}
+
 .tab-actions {
   display: flex;
   justify-content: flex-end;

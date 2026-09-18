@@ -56,7 +56,13 @@ class StatisticsService:
 
         overdue = (
             db.session.query(func.count(MaintenanceTask.id))
-            .filter(MaintenanceTask.status.in_(OPEN_STATUSES), MaintenanceTask.plan_date < current)
+            .join(GreenSpace, MaintenanceTask.green_space_id == GreenSpace.id)
+            .filter(
+                MaintenanceTask.status.in_(OPEN_STATUSES),
+                MaintenanceTask.plan_date < current,
+                # 占绿期间绿地不参与养护考核，其逾期任务不计入
+                GreenSpace.status != "occupied",
+            )
             .scalar()
             or 0
         )
@@ -300,6 +306,8 @@ class StatisticsService:
     # ------------------------------------------------------------ 榜单与提醒
     @staticmethod
     def green_space_ranking(limit=5):
+        """养护工作量排名：占绿中的绿地不参与养护考核，不进榜。"""
+
         replacement_quantity = (
             db.select(func.coalesce(func.sum(PlantReplacement.quantity), 0))
             .where(PlantReplacement.green_space_id == GreenSpace.id)
@@ -318,6 +326,7 @@ class StatisticsService:
                 replacement_quantity,
             )
             .join(MaintenanceRecord, MaintenanceRecord.green_space_id == GreenSpace.id)
+            .filter(GreenSpace.status != "occupied")
             .group_by(GreenSpace.id, GreenSpace.code, GreenSpace.name, GreenSpace.district,
                       GreenSpace.area_sqm)
             .order_by(func.count(MaintenanceRecord.id).desc())
@@ -340,11 +349,15 @@ class StatisticsService:
 
     @staticmethod
     def overdue_tasks(limit=10):
+        """逾期任务提醒：占绿中的绿地不参与养护考核，其任务不列入。"""
+
         tasks = (
             db.session.query(MaintenanceTask)
+            .join(GreenSpace, MaintenanceTask.green_space_id == GreenSpace.id)
             .filter(
                 MaintenanceTask.status.in_(OPEN_STATUSES),
                 MaintenanceTask.plan_date < today(),
+                GreenSpace.status != "occupied",
             )
             .order_by(MaintenanceTask.plan_date.asc())
             .limit(limit)

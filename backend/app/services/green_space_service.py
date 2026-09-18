@@ -5,7 +5,13 @@ from sqlalchemy import and_, func, or_
 from ..constants import ENUM_GROUPS, GREEN_SPACE_STATUS
 from ..errors import ConflictError
 from ..extensions import db
-from ..models import GreenSpace, MaintenanceRecord, MaintenanceTask, PlantReplacement
+from ..models import (
+    GreenSpace,
+    GreenSpaceOccupation,
+    MaintenanceRecord,
+    MaintenanceTask,
+    PlantReplacement,
+)
 from ..models.maintenance_task import OPEN_STATUSES
 from ..utils.dates import format_date, today
 from ..utils.numbers import to_float
@@ -216,6 +222,38 @@ class GreenSpaceService(BaseService):
             .all()
         )
 
+        occupation_rows = (
+            db.session.query(GreenSpaceOccupation.status, func.count(GreenSpaceOccupation.id))
+            .filter(GreenSpaceOccupation.green_space_id == space.id)
+            .group_by(GreenSpaceOccupation.status)
+            .all()
+        )
+        occupation_status = {code: 0 for code in ENUM_GROUPS["occupation_status"].values}
+        for status, count in occupation_rows:
+            occupation_status[status] = count
+        current_occupation = (
+            db.session.query(GreenSpaceOccupation)
+            .filter(
+                GreenSpaceOccupation.green_space_id == space.id,
+                GreenSpaceOccupation.status == "approved",
+            )
+            .order_by(GreenSpaceOccupation.id.desc())
+            .first()
+        )
+        recent_occupations = (
+            db.session.query(GreenSpaceOccupation)
+            .filter(GreenSpaceOccupation.green_space_id == space.id)
+            .order_by(GreenSpaceOccupation.id.desc())
+            .limit(5)
+            .all()
+        )
+
+        # 占绿期间绿地不参与养护考核，养护逾期标识不置位
+        is_maintenance_overdue = (
+            space.status != "occupied"
+            and (record_stats[2] is None or (today() - record_stats[2]).days > 30)
+        )
+
         return {
             "green_space": space.to_dict(detail=True),
             "statistics": {
@@ -226,10 +264,13 @@ class GreenSpaceService(BaseService):
                 "replacement_quantity": to_float(replacement_stats[1]) or 0,
                 "replacement_amount": to_float(replacement_stats[2]) or 0,
                 "task_status": task_status,
-                "is_maintenance_overdue": (
-                    record_stats[2] is None or (today() - record_stats[2]).days > 30
-                ),
+                "occupation_status": occupation_status,
+                "is_maintenance_overdue": is_maintenance_overdue,
             },
+            "current_occupation": (
+                current_occupation.to_dict(detail=True) if current_occupation else None
+            ),
+            "recent_occupations": [item.to_dict() for item in recent_occupations],
             "replacement_summary": [
                 {
                     "reason": reason,
@@ -262,11 +303,16 @@ class GreenSpaceService(BaseService):
             .filter(PlantReplacement.green_space_id == space.id)
             .scalar()
             or 0,
+            "green_space_occupation": db.session.query(func.count(GreenSpaceOccupation.id))
+            .filter(GreenSpaceOccupation.green_space_id == space.id)
+            .scalar()
+            or 0,
         }
         if sum(counts.values()) and not force:
             raise ConflictError(
                 "该绿地已存在养护任务 {maintenance_task} 条、养护记录 {maintenance_record} 条、"
-                "绿植更换记录 {plant_replacement} 条，删除将一并清除，请确认后重试".format(**counts),
+                "绿植更换记录 {plant_replacement} 条、占用登记 {green_space_occupation} 条，"
+                "删除将一并清除，请确认后重试".format(**counts),
                 details=counts,
             )
         db.session.delete(space)
